@@ -116,43 +116,70 @@ const num = v => { const n = parseFloat(String(v ?? "").replace(/[\sR,]/g, ""));
 const fmtR = n => "R" + Math.round(n).toLocaleString("en-ZA").replace(/ /g, " ");
 
 /* ---------- Price data ----------
-   1st choice: VALR's public candles (real BTC/ZAR and ETH/ZAR trades, priced close to Luno).
-   Fallback:   Binance candles in USDT multiplied by today's dollar-rand rate. Older candles then
-               carry today's rate, so it's an approximation, and the price strip says so in amber. */
-const TF_SECONDS = { "1d": 86400, "4h": 14400, "1h": 3600 };
+   Rand price = Binance BTC/USDT (or ETH/USDT) × Binance USDT/ZAR, candle by candle.
+   Binance lets web pages read its prices and streams them live, which VALR and Luno don't.
+   USDT tracks the dollar, and Binance's USDT/ZAR is a real rand market, so this lands close to
+   Luno's BTC/ZAR, but not exactly: always check Luno before you place an order.
+   If the USDT/ZAR market is ever unavailable, the forex dollar-rand rate is used instead (amber label). */
+const BIN = "https://api.binance.com/api/v3/klines";
+const klines = async (sym, tf) => {
+  const r = await fetch(`${BIN}?symbol=${sym}&interval=${tf}&limit=300`);
+  if (!r.ok) throw new Error(sym + " " + r.status);
+  return r.json();                                  // [[openTime, open, high, low, close, ...], ...]
+};
 
-async function fromValr(pair, tf){
-  const sec = TF_SECONDS[tf];
-  // ask for ~300 candles back; VALR may cap how many buckets one call returns
-  const start = new Date(Date.now() - sec * 300 * 1000).toISOString();
-  const r = await fetch(`https://api.valr.com/v1/public/${pair}ZAR/buckets?periodSeconds=${sec}&startTime=${encodeURIComponent(start)}`);
-  if (!r.ok) throw new Error("VALR " + r.status);
-  const rows = await r.json();
-  const candles = rows.map(b => ({ time: Math.floor(Date.parse(b.startTime) / 1000), open: +b.open, high: +b.high, low: +b.low, close: +b.close }))
-    .filter(c => c.time && c.open && c.close)          // skip all-zero buckets where nothing traded
-    .sort((a, b) => a.time - b.time)
-    .filter((c, i, a) => i === 0 || c.time !== a[i - 1].time);   // the chart needs unique, rising times
-  if (candles.length < 10) throw new Error("VALR returned too little data");
-  return { candles, source: `VALR · ${pair}/ZAR`, approx: false };
-}
-
-let usdZar = null;
-async function fromBinance(pair, tf){
-  if (!usdZar){
-    const fx = await (await fetch("https://open.er-api.com/v6/latest/USD")).json();
-    usdZar = fx && fx.rates && fx.rates.ZAR;
-    if (!usdZar) throw new Error("No dollar-rand rate");
-  }
-  const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}USDT&interval=${tf}&limit=300`);
-  if (!r.ok) throw new Error("Binance " + r.status);
-  const k = await r.json();
-  const candles = k.map(c => ({ time: Math.floor(c[0] / 1000), open: c[1] * usdZar, high: c[2] * usdZar, low: c[3] * usdZar, close: c[4] * usdZar }));
-  return { candles, source: `Binance ${pair}/USDT × R${usdZar.toFixed(2)} per $ (approximate)`, approx: true };
+let fxRate = null;                                  // forex fallback, fetched once per session
+async function forexRate(){
+  if (!fxRate){ const fx = await (await fetch("https://open.er-api.com/v6/latest/USD")).json(); fxRate = fx && fx.rates && fx.rates.ZAR; }
+  if (!fxRate) throw new Error("No dollar-rand rate");
+  return fxRate;
 }
 
 async function loadData(){
-  try { return await fromValr(state.pair, state.tf); }
-  catch(e){ console.warn("VALR failed, using Binance:", e); return await fromBinance(state.pair, state.tf); }
+  const coin = await klines(`${state.pair}USDT`, state.tf);
+  let rateAt, live = true;
+  try {
+    const zar = await klines("USDTZAR", state.tf);
+    const byTime = new Map(zar.map(k => [k[0], k]));
+    let last = +zar[0][4];
+    // USDT/ZAR trades less than BTC; where a candle is missing, carry the last known rate forward
+    rateAt = t => { const k = byTime.get(t); if (k) last = +k[4]; return { o: k ? +k[1] : last, c: last }; };
+  } catch(e){
+    const r = await forexRate(); live = false;
+    rateAt = () => ({ o: r, c: r });
+  }
+  let rate = null;                                  // the rate behind the newest candle, used by the live stream
+  const candles = coin.map(k => {
+    const r = rateAt(k[0]); rate = r.c;
+    return { time: Math.floor(k[0] / 1000), open: k[1] * r.o, high: k[2] * r.c, low: k[3] * r.c, close: k[4] * r.c };
+  });
+  return { candles, live, rate,
+    source: live ? `Binance ${state.pair}/USDT × USDT/ZAR · live` : `Binance ${state.pair}/USDT × forex R${fxRate.toFixed(2)}/$ (approximate)`,
+    approx: !live };
+}
+
+/* Live updates: one Binance websocket streams the coin's current candle and USDT/ZAR's latest price,
+   so the last candle and the price at the top move as trades happen. */
+let ws = null, liveZar = null, liveCoin = null;
+function startStream(){
+  if (ws){ ws.onclose = null; ws.close(); }
+  liveZar = liveCoin = null;
+  const s = `${state.pair.toLowerCase()}usdt@kline_${state.tf}/usdtzar@kline_${state.tf}`;
+  ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${s}`);
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data), k = m.data && m.data.k; if (!k) return;
+    if (k.s === "USDTZAR") liveZar = +k.c; else liveCoin = k;
+    if (!liveCoin || !series || !lastCandles.length) return;
+    const r = liveZar || lastRate;                  // until USDT/ZAR ticks, use the last rate we loaded
+    const bar = { time: Math.floor(liveCoin.t / 1000), open: liveCoin.o * r, high: liveCoin.h * r, low: liveCoin.l * r, close: liveCoin.c * r };
+    const tail = lastCandles[lastCandles.length - 1];
+    if (bar.time < tail.time) return;
+    if (bar.time === tail.time){ bar.open = tail.open; lastCandles[lastCandles.length - 1] = bar; } else lastCandles.push(bar);
+    series.update(bar);
+    showPrice();
+  };
+  // Phones drop sockets when the app is in the background; reconnect after a short pause
+  ws.onclose = () => { setTimeout(() => { if (!document.hidden) startStream(); }, 3000); };
 }
 
 /* ---------- Chart ---------- */
@@ -175,26 +202,30 @@ function buildChart(){
   });
 }
 
-let lastCandles = [], loadId = 0;
+let lastCandles = [], loadId = 0, lastRate = null, lastSource = null;
+function showPrice(){
+  const a = lastCandles[lastCandles.length - 2], b = lastCandles[lastCandles.length - 1]; if (!b) return;
+  const pct = a ? (b.close - a.close) / a.close * 100 : 0;
+  $("px").textContent = fmtR(b.close);
+  $("chg").textContent = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+  $("chg").className = "chg " + (pct >= 0 ? "up" : "down");
+  renderPanel();
+}
 async function refresh(full){
   const id = ++loadId;
   if (full){ $("msg").hidden = false; $("msg").textContent = "Loading prices…"; }
   try {
     const d = await loadData();
     if (id !== loadId) return;                       // a newer request (pair or timeframe change) won
-    lastCandles = d.candles;
+    lastCandles = d.candles; lastSource = d;
+    lastRate = d.rate;
     series.setData(d.candles);
     if (full) chart.timeScale().fitContent();
     $("msg").hidden = true;
-    // Price strip: last close and change versus the previous candle
-    const a = d.candles[d.candles.length - 2], b = d.candles[d.candles.length - 1];
-    const pct = a ? (b.close - a.close) / a.close * 100 : 0;
-    $("px").textContent = fmtR(b.close);
-    $("chg").textContent = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
-    $("chg").className = "chg " + (pct >= 0 ? "up" : "down");
-    $("src").textContent = d.source + " · " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + " · check Luno before you order";
+    $("src").textContent = d.source + " · check Luno before you order";
     $("src").className = "src" + (d.approx ? " warn" : "");
-    drawLines();
+    drawLines(); showPrice();
+    if (d.live) startStream();
   } catch(e){
     if (id !== loadId) return;
     $("msg").hidden = false;
@@ -274,7 +305,7 @@ if (!window.LightweightCharts){
 } else {
   wire("pair","pair"); wire("tf","tf");
   buildChart(); refresh(true);
-  setInterval(() => refresh(false), 60000);                        // new candles every minute
+  setInterval(() => refresh(false), 5 * 60000);                    // safety net; the live stream does the real-time work
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });  // fresh prices when you reopen the app
 }
 </script>
