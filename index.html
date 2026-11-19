@@ -20,7 +20,8 @@
     --font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
   :root[data-theme="light"]{--bg:#F5F6F8;--surface:#FFFFFF;--sunk:#EEF0F3;--ink:#111720;--muted:#5B6573;--line:#E2E5EA;--accent:#2F6BEB}
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0}
+  html,body{height:100%;margin:0;overflow:hidden}
+  body{height:100dvh}
   body{background:var(--bg);color:var(--ink);font:14px/1.4 var(--font);-webkit-font-smoothing:antialiased;
     display:grid;grid-template-rows:auto minmax(0,1fr) auto;
     padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
@@ -35,7 +36,9 @@
   a.btn,button.icon{font:600 13px var(--font);color:var(--ink);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
   a.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
   #chart{min-height:0;position:relative}
-  #chart .tradingview-widget-container,#chart .tradingview-widget-container__widget{height:100%;width:100%}
+  #chart .tradingview-widget-container{position:absolute;inset:0}
+  #chart .tradingview-widget-container__widget{height:100%;width:100%}
+  #chart .tradingview-widget-copyright{display:none}
   .off{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:24px}
   .hint{color:var(--muted);font-size:12px}
 </style>
@@ -43,7 +46,7 @@
 <body>
 <header>
   <div class="seg" id="pair" role="group" aria-label="Pair"><button data-v="BTC" class="pair">BTC</button><button data-v="ETH" class="pair">ETH</button></div>
-  <div class="seg" id="quote" role="group" aria-label="Priced in"><button data-v="ZAR">ZAR</button><button data-v="USD">USD</button></div>
+  <div class="seg" id="quote" role="group" aria-label="Priced in"><button data-v="USD">USD</button><button data-v="ZAR">R≈</button></div>
   <span class="grow"></span>
   <div class="seg" id="tf" role="group" aria-label="Timeframe"><button data-v="D">1D</button><button data-v="240">4h</button><button data-v="60">1h</button></div>
 </header>
@@ -52,7 +55,7 @@
 
 <footer>
   <a class="btn primary" href="https://claude.ai/artifact/2K7BbmHwqPW1wo92Y6SCjU">Trading Desk ↗</a>
-  <a class="btn" href="https://www.luno.com/">Luno ↗</a>
+  <a class="btn" href="https://www.luno.com/en/exchange">Luno ↗</a>
   <span class="grow"></span>
   <button class="icon" id="theme" type="button" aria-label="Switch theme">Light / dark</button>
 </footer>
@@ -64,13 +67,14 @@ const store = {
   get(k, d){ try { const v = localStorage.getItem("charts-" + k); return v === null ? d : v; } catch(e){ return d; } },
   set(k, v){ try { localStorage.setItem("charts-" + k, v); } catch(e){} }
 };
-const state = { pair: store.get("pair","BTC"), quote: store.get("quote","ZAR"), tf: store.get("tf","D"), theme: store.get("theme","dark") };
+const state = { pair: store.get("pair","BTC"), quote: store.get("quote2","USD"), tf: store.get("tf","D"), theme: store.get("theme","dark") };
 
 /* Which TradingView symbol to show.
-   ZAR: no exchange prefix, so TradingView picks its own rand feed. It can differ a little from Luno,
-   so the trend and levels are what count; always check the price on Luno before placing an order.
-   USD: Binance's USDT pairs, the deepest market, handy when the rand chart looks thin. */
-const symbolFor = () => state.quote === "ZAR" ? `${state.pair}ZAR` : `BINANCE:${state.pair}USDT`;
+   USD (default): Binance's USDT pair, the deepest market. Trend and levels read the same as on Luno.
+   R≈: TradingView's free chart has no rand feed for Luno, so this multiplies the Binance price by the
+   live dollar-rand rate (a TradingView "spread" symbol). It tracks Luno closely but not exactly,
+   so always check the real price on Luno before placing an order. */
+const symbolFor = () => state.quote === "ZAR" ? `BINANCE:${state.pair}USDT*FX_IDC:USDZAR` : `BINANCE:${state.pair}USDT`;
 
 /* TradingView's free Advanced Chart widget. Changing a setting rebuilds it, because the widget
    reads its settings only once, when its script loads. */
@@ -104,7 +108,7 @@ function wire(id, key){
   const paint = () => el.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === state[key]));
   el.addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b || b.dataset.v === state[key]) return;
-    state[key] = b.dataset.v; store.set(key, state[key]); paint(); loadChart();
+    state[key] = b.dataset.v; store.set(key === "quote" ? "quote2" : key, state[key]); paint(); loadChart();
   });
   paint();
 }
