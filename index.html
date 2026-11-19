@@ -122,6 +122,8 @@ const fmtR = n => "R" + Math.round(n).toLocaleString("en-ZA").replace(/ /g, " "
    Luno's BTC/ZAR, but not exactly: always check Luno before you place an order.
    If the USDT/ZAR market is ever unavailable, the forex dollar-rand rate is used instead (amber label). */
 const BIN = "https://api.binance.com/api/v3/klines";
+// The chart library shows times as UTC; shifting every candle by the phone's offset makes it show local time (SAST)
+const TZ_S = -new Date().getTimezoneOffset() * 60;
 const klines = async (sym, tf) => {
   const r = await fetch(`${BIN}?symbol=${sym}&interval=${tf}&limit=300`);
   if (!r.ok) throw new Error(sym + " " + r.status);
@@ -151,7 +153,7 @@ async function loadData(){
   let rate = null;                                  // the rate behind the newest candle, used by the live stream
   const candles = coin.map(k => {
     const r = rateAt(k[0]); rate = r.c;
-    return { time: Math.floor(k[0] / 1000), open: k[1] * r.o, high: k[2] * r.c, low: k[3] * r.c, close: k[4] * r.c };
+    return { time: Math.floor(k[0] / 1000) + TZ_S, open: k[1] * r.o, high: k[2] * r.c, low: k[3] * r.c, close: k[4] * r.c };
   });
   return { candles, live, rate,
     source: live ? `Binance ${state.pair}/USDT × USDT/ZAR · live` : `Binance ${state.pair}/USDT × forex R${fxRate.toFixed(2)}/$ (approximate)`,
@@ -171,7 +173,7 @@ function startStream(){
     if (k.s === "USDTZAR") liveZar = +k.c; else liveCoin = k;
     if (!liveCoin || !series || !lastCandles.length) return;
     const r = liveZar || lastRate;                  // until USDT/ZAR ticks, use the last rate we loaded
-    const bar = { time: Math.floor(liveCoin.t / 1000), open: liveCoin.o * r, high: liveCoin.h * r, low: liveCoin.l * r, close: liveCoin.c * r };
+    const bar = { time: Math.floor(liveCoin.t / 1000) + TZ_S, open: liveCoin.o * r, high: liveCoin.h * r, low: liveCoin.l * r, close: liveCoin.c * r };
     const tail = lastCandles[lastCandles.length - 1];
     if (bar.time < tail.time) return;
     if (bar.time === tail.time){ bar.open = tail.open; lastCandles[lastCandles.length - 1] = bar; } else lastCandles.push(bar);
