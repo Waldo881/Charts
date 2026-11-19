@@ -15,114 +15,268 @@
 <link rel="icon" href="icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
 <style>
-  /* Same palette as the Trading Desk so the two feel like one system */
-  :root{--bg:#0B0D10;--surface:#12151A;--sunk:#1B1F26;--ink:#E6E9EE;--muted:#8B94A1;--line:#232833;--accent:#5B8DEF;
+  /* Same palette as the Trading Desk so the two feel like one system.
+     Green and red are kept for up/down and the stop/target lines only. */
+  :root{--bg:#0B0D10;--surface:#12151A;--sunk:#1B1F26;--ink:#E6E9EE;--muted:#8B94A1;--line:#232833;--accent:#5B8DEF;--up:#2BC48A;--down:#F0616D;--warn:#E5A93A;
     --font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
-  :root[data-theme="light"]{--bg:#F5F6F8;--surface:#FFFFFF;--sunk:#EEF0F3;--ink:#111720;--muted:#5B6573;--line:#E2E5EA;--accent:#2F6BEB}
+  :root[data-theme="light"]{--bg:#F5F6F8;--surface:#FFFFFF;--sunk:#EEF0F3;--ink:#111720;--muted:#5B6573;--line:#E2E5EA;--accent:#2F6BEB;--up:#15995F;--down:#D63A47;--warn:#B7790F}
   *{box-sizing:border-box}
+  [hidden]{display:none!important}
   html,body{height:100%;margin:0;overflow:hidden}
-  body{height:100dvh}
-  body{background:var(--bg);color:var(--ink);font:14px/1.4 var(--font);-webkit-font-smoothing:antialiased;
-    display:grid;grid-template-rows:auto minmax(0,1fr) auto;
+  body{height:100dvh;background:var(--bg);color:var(--ink);font:14px/1.4 var(--font);-webkit-font-smoothing:antialiased;
+    display:grid;grid-template-rows:auto auto minmax(0,1fr) auto auto;
     padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-  header,footer{display:flex;align-items:center;gap:6px;padding:8px 10px}
+  header,footer,.quote{display:flex;align-items:center;gap:6px;padding:8px 10px}
   header{border-bottom:1px solid var(--line)}
-  footer{border-top:1px solid var(--line);justify-content:space-between}
-  .seg{display:inline-flex;background:var(--sunk);border-radius:9px;padding:3px;gap:2px}
-  .seg button{font:600 13px var(--font);border:0;background:transparent;color:var(--muted);padding:6px 10px;border-radius:7px;cursor:pointer}
-  .seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
-  .pair{font:600 13px var(--mono)}
+  footer{border-top:1px solid var(--line)}
   .grow{flex:1}
-  a.btn,button.icon{font:600 13px var(--font);color:var(--ink);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
-  a.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .seg{display:inline-flex;background:var(--sunk);border-radius:9px;padding:3px;gap:2px}
+  .seg button{font:600 13px var(--font);border:0;background:transparent;color:var(--muted);padding:6px 11px;border-radius:7px;cursor:pointer}
+  .seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+  button.btn,a.btn{font:600 13px var(--font);color:var(--ink);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 11px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  /* Price strip: last price, change, and where the data comes from */
+  .quote{padding-block:10px 4px;flex-wrap:wrap}
+  .px{font:600 22px var(--mono);letter-spacing:-.02em}
+  .chg{font:600 13px var(--mono)}
+  .up{color:var(--up)} .down{color:var(--down)}
+  .src{font-size:11px;color:var(--muted);width:100%}
+  .src.warn{color:var(--warn)}
   #chart{min-height:0;position:relative}
-  #chart .tradingview-widget-container{position:absolute;inset:0}
-  #chart .tradingview-widget-container__widget{height:100%;width:100%}
-  #chart .tradingview-widget-copyright{display:none}
-  .off{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:24px}
-  .hint{color:var(--muted);font-size:12px}
+  .msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:24px;z-index:2}
+  /* Levels & trade panel */
+  #panel{border-top:1px solid var(--line);padding:10px;display:grid;gap:12px;max-height:46dvh;overflow:auto;background:var(--surface)}
+  #panel h3{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  input{font:15px var(--mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+  input:focus{outline:none;border-color:var(--accent)}
+  label{display:grid;gap:4px;font-size:11px;color:var(--muted);flex:1;min-width:0}
+  .lv{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font:13px var(--mono)}
+  .lv:first-child{border-top:0}
+  .lv span.d{color:var(--muted);font-size:12px}
+  .x{border:0;background:transparent;color:var(--muted);font-size:16px;padding:2px 8px;cursor:pointer}
+  .hint{font-size:11px;color:var(--muted);margin:6px 0}
 </style>
 </head>
 <body>
 <header>
-  <div class="seg" id="pair" role="group" aria-label="Pair"><button data-v="BTC" class="pair">BTC</button><button data-v="ETH" class="pair">ETH</button></div>
-  <div class="seg" id="quote" role="group" aria-label="Priced in"><button data-v="USD">USD</button><button data-v="ZAR">R≈</button></div>
+  <div class="seg" id="pair" role="group" aria-label="Pair"><button data-v="BTC">BTC</button><button data-v="ETH">ETH</button></div>
   <span class="grow"></span>
-  <div class="seg" id="tf" role="group" aria-label="Timeframe"><button data-v="D">1D</button><button data-v="240">4h</button><button data-v="60">1h</button></div>
+  <div class="seg" id="tf" role="group" aria-label="Timeframe"><button data-v="1d">1D</button><button data-v="4h">4h</button><button data-v="1h">1h</button></div>
 </header>
 
-<main id="chart"><div class="off" id="off" hidden>The chart couldn't load. Check your connection and reopen the app.</div></main>
+<div class="quote">
+  <span class="px" id="px">—</span><span class="chg" id="chg"></span>
+  <span class="src" id="src">Loading…</span>
+</div>
+
+<main id="chart"><div class="msg" id="msg">Loading prices…</div></main>
+
+<!-- Your weekly-prep levels and the open trade, drawn as lines on the chart. Saved on this phone. -->
+<section id="panel" hidden>
+  <div>
+    <h3>Key levels <span id="lv-pair"></span></h3>
+    <div id="levels"></div>
+    <form class="row" id="lv-form" autocomplete="off">
+      <label>Add a level (R)<input id="lv-in" inputmode="decimal" placeholder="1750000"></label>
+      <button class="btn" type="submit" style="align-self:end">Add</button>
+    </form>
+  </div>
+  <div>
+    <h3>Open trade</h3>
+    <div class="row">
+      <label>Entry<input id="tr-entry" inputmode="decimal"></label>
+      <label>Stop<input id="tr-stop" inputmode="decimal"></label>
+      <label>Target<input id="tr-target" inputmode="decimal"></label>
+    </div>
+    <p class="hint" id="tr-info">Fill in to see the lines and how far price is from each.</p>
+    <button class="btn" type="button" id="tr-clear">Clear trade</button>
+  </div>
+</section>
 
 <footer>
-  <a class="btn primary" href="https://claude.ai/artifact/2K7BbmHwqPW1wo92Y6SCjU">Trading Desk ↗</a>
-  <a class="btn" href="https://www.luno.com/en/exchange">Luno ↗</a>
+  <button class="btn" type="button" id="toggle-panel">Levels &amp; trade</button>
   <span class="grow"></span>
-  <button class="icon" id="theme" type="button" aria-label="Switch theme">Light / dark</button>
+  <a class="btn primary" href="https://claude.ai/artifact/2K7BbmHwqPW1wo92Y6SCjU">Desk ↗</a>
+  <a class="btn" href="https://www.luno.com/en/exchange">Luno ↗</a>
+  <button class="btn" type="button" id="theme" aria-label="Switch theme">◑</button>
 </footer>
 
+<!-- TradingView's free, open-source charting library (Apache 2.0). Pinned so an update can't break the app. -->
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
-/* Settings live in localStorage so the app reopens on the same pair, currency, timeframe and theme.
-   Wrapped in try/catch because private browsing can block storage. */
+/* ---------- Saved settings (localStorage; try/catch because private browsing can block it) ---------- */
 const store = {
-  get(k, d){ try { const v = localStorage.getItem("charts-" + k); return v === null ? d : v; } catch(e){ return d; } },
-  set(k, v){ try { localStorage.setItem("charts-" + k, v); } catch(e){} }
+  get(k, d){ try { const v = localStorage.getItem("c2-" + k); return v === null ? d : JSON.parse(v); } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem("c2-" + k, JSON.stringify(v)); } catch(e){} }
 };
-const state = { pair: store.get("pair","BTC"), quote: store.get("quote2","USD"), tf: store.get("tf","D"), theme: store.get("theme","dark") };
+const state = { pair: store.get("pair","BTC"), tf: store.get("tf","1d"), theme: store.get("theme","dark") };
+const $ = id => document.getElementById(id);
+const num = v => { const n = parseFloat(String(v ?? "").replace(/[\sR,]/g, "")); return isFinite(n) && n > 0 ? n : null; };
+const fmtR = n => "R" + Math.round(n).toLocaleString("en-ZA").replace(/ /g, " ");
 
-/* Which TradingView symbol to show.
-   USD (default): Binance's USDT pair, the deepest market. Trend and levels read the same as on Luno.
-   R≈: TradingView's free chart has no rand feed for Luno, so this multiplies the Binance price by the
-   live dollar-rand rate (a TradingView "spread" symbol). It tracks Luno closely but not exactly,
-   so always check the real price on Luno before placing an order. */
-const symbolFor = () => state.quote === "ZAR" ? `BINANCE:${state.pair}USDT*FX_IDC:USDZAR` : `BINANCE:${state.pair}USDT`;
+/* ---------- Price data ----------
+   1st choice: VALR's public candles (real BTC/ZAR and ETH/ZAR trades, priced close to Luno).
+   Fallback:   Binance candles in USDT multiplied by today's dollar-rand rate. Older candles then
+               carry today's rate, so it's an approximation, and the price strip says so in amber. */
+const TF_SECONDS = { "1d": 86400, "4h": 14400, "1h": 3600 };
 
-/* TradingView's free Advanced Chart widget. Changing a setting rebuilds it, because the widget
-   reads its settings only once, when its script loads. */
-function loadChart(){
-  const host = document.getElementById("chart");
-  host.querySelectorAll(".tradingview-widget-container").forEach(n => n.remove());
-  document.getElementById("off").hidden = true;
-  const box = document.createElement("div");
-  box.className = "tradingview-widget-container";
-  box.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
-  const s = document.createElement("script");
-  s.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-  s.async = true;
-  s.textContent = JSON.stringify({
-    autosize: true, symbol: symbolFor(), interval: state.tf, timezone: "Africa/Johannesburg",
-    theme: state.theme, style: "1", locale: "en",
-    backgroundColor: state.theme === "dark" ? "#0B0D10" : "#FFFFFF",
-    allow_symbol_change: true,      // lets you pick another feed from the symbol search if this one looks off
-    hide_side_toolbar: window.innerWidth < 600,   // drawing tools take too much room on a phone held upright
-    withdateranges: true, calendar: false, details: false, save_image: false,
-    support_host: "https://www.tradingview.com"
-  });
-  s.onerror = () => { document.getElementById("off").hidden = false; };
-  box.append(s);
-  host.append(box);
+async function fromValr(pair, tf){
+  const sec = TF_SECONDS[tf];
+  // ask for ~300 candles back; VALR may cap how many buckets one call returns
+  const start = new Date(Date.now() - sec * 300 * 1000).toISOString();
+  const r = await fetch(`https://api.valr.com/v1/public/${pair}ZAR/buckets?periodSeconds=${sec}&startTime=${encodeURIComponent(start)}`);
+  if (!r.ok) throw new Error("VALR " + r.status);
+  const rows = await r.json();
+  const candles = rows.map(b => ({ time: Math.floor(Date.parse(b.startTime) / 1000), open: +b.open, high: +b.high, low: +b.low, close: +b.close }))
+    .filter(c => c.time && c.open && c.close)          // skip all-zero buckets where nothing traded
+    .sort((a, b) => a.time - b.time)
+    .filter((c, i, a) => i === 0 || c.time !== a[i - 1].time);   // the chart needs unique, rising times
+  if (candles.length < 10) throw new Error("VALR returned too little data");
+  return { candles, source: `VALR · ${pair}/ZAR`, approx: false };
 }
 
-/* Segmented controls: highlight the current choice, save it and redraw */
-function wire(id, key){
-  const el = document.getElementById(id);
-  const paint = () => el.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === state[key]));
+let usdZar = null;
+async function fromBinance(pair, tf){
+  if (!usdZar){
+    const fx = await (await fetch("https://open.er-api.com/v6/latest/USD")).json();
+    usdZar = fx && fx.rates && fx.rates.ZAR;
+    if (!usdZar) throw new Error("No dollar-rand rate");
+  }
+  const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${pair}USDT&interval=${tf}&limit=300`);
+  if (!r.ok) throw new Error("Binance " + r.status);
+  const k = await r.json();
+  const candles = k.map(c => ({ time: Math.floor(c[0] / 1000), open: c[1] * usdZar, high: c[2] * usdZar, low: c[3] * usdZar, close: c[4] * usdZar }));
+  return { candles, source: `Binance ${pair}/USDT × R${usdZar.toFixed(2)} per $ (approximate)`, approx: true };
+}
+
+async function loadData(){
+  try { return await fromValr(state.pair, state.tf); }
+  catch(e){ console.warn("VALR failed, using Binance:", e); return await fromBinance(state.pair, state.tf); }
+}
+
+/* ---------- Chart ---------- */
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let chart, series, lines = [];
+function buildChart(){
+  if (chart){ chart.remove(); lines = []; }
+  chart = LightweightCharts.createChart($("chart"), {
+    autoSize: true,
+    layout: { background: { color: css("--bg") }, textColor: css("--muted"), fontFamily: css("--mono"), fontSize: 11 },
+    grid: { vertLines: { color: css("--line") }, horzLines: { color: css("--line") } },
+    rightPriceScale: { borderColor: css("--line") },
+    timeScale: { borderColor: css("--line"), timeVisible: state.tf !== "1d", rightOffset: 4 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    localization: { priceFormatter: p => Math.round(p).toLocaleString("en-ZA").replace(/ /g, " ") }
+  });
+  series = chart.addCandlestickSeries({
+    upColor: css("--up"), downColor: css("--down"), borderVisible: false,
+    wickUpColor: css("--up"), wickDownColor: css("--down")
+  });
+}
+
+let lastCandles = [], loadId = 0;
+async function refresh(full){
+  const id = ++loadId;
+  if (full){ $("msg").hidden = false; $("msg").textContent = "Loading prices…"; }
+  try {
+    const d = await loadData();
+    if (id !== loadId) return;                       // a newer request (pair or timeframe change) won
+    lastCandles = d.candles;
+    series.setData(d.candles);
+    if (full) chart.timeScale().fitContent();
+    $("msg").hidden = true;
+    // Price strip: last close and change versus the previous candle
+    const a = d.candles[d.candles.length - 2], b = d.candles[d.candles.length - 1];
+    const pct = a ? (b.close - a.close) / a.close * 100 : 0;
+    $("px").textContent = fmtR(b.close);
+    $("chg").textContent = (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+    $("chg").className = "chg " + (pct >= 0 ? "up" : "down");
+    $("src").textContent = d.source + " · " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + " · check Luno before you order";
+    $("src").className = "src" + (d.approx ? " warn" : "");
+    drawLines();
+  } catch(e){
+    if (id !== loadId) return;
+    $("msg").hidden = false;
+    $("msg").textContent = "Couldn't load prices. Check your connection; the app retries every minute.";
+    $("src").textContent = "Offline";
+  }
+}
+
+/* ---------- Levels and the open trade, saved per pair on this phone ---------- */
+const key = k => `${k}-${state.pair}`;
+const getLevels = () => store.get(key("levels"), []);
+const getTrade = () => store.get(key("trade"), {});
+
+function drawLines(){
+  if (!series) return;
+  lines.forEach(l => series.removePriceLine(l)); lines = [];
+  const add = (price, color, title, style) => lines.push(series.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
+  getLevels().forEach(p => add(p, css("--muted"), "", LightweightCharts.LineStyle.Dashed));
+  const t = getTrade();
+  if (t.entry) add(t.entry, css("--accent"), "Entry", LightweightCharts.LineStyle.Solid);
+  if (t.stop) add(t.stop, css("--down"), "Stop", LightweightCharts.LineStyle.Solid);
+  if (t.target) add(t.target, css("--up"), "Target", LightweightCharts.LineStyle.Solid);
+  renderPanel();
+}
+
+function renderPanel(){
+  const last = lastCandles.length ? lastCandles[lastCandles.length - 1].close : null;
+  const away = p => { if (!last) return ""; const x = (p - last) / last * 100; return (x >= 0 ? "+" : "") + x.toFixed(1) + "%"; };
+  $("lv-pair").textContent = `· ${state.pair}/ZAR`;
+  const lv = getLevels().slice().sort((a, b) => b - a);
+  $("levels").innerHTML = lv.length
+    ? lv.map(p => `<div class="lv"><span>${fmtR(p)}</span><span class="d">${away(p)}</span><span class="grow"></span><button class="x" data-del="${p}" aria-label="Delete level">✕</button></div>`).join("")
+    : `<p class="hint">No levels yet. Add the 4–6 from your weekly prep.</p>`;
+  const t = getTrade();
+  ["entry","stop","target"].forEach(f => { const el = $("tr-" + f); if (document.activeElement !== el) el.value = t[f] ? Math.round(t[f]) : ""; });
+  if (t.entry && t.stop){
+    const risk = Math.abs(t.entry - t.stop), rr = t.target ? Math.abs(t.target - t.entry) / risk : null;
+    $("tr-info").textContent = `Stop ${away(t.stop)} from price` + (t.target ? ` · target ${away(t.target)} · ${rr.toFixed(1)}R` : "") + (rr != null && rr < 2 ? " · below your 2R minimum" : "");
+  } else $("tr-info").textContent = "Fill in to see the lines and how far price is from each.";
+}
+
+$("lv-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const p = num($("lv-in").value); if (!p) return;
+  store.set(key("levels"), [...getLevels().filter(x => x !== p), p].slice(-8));   // max 8 keeps the chart readable
+  $("lv-in").value = ""; drawLines();
+});
+$("levels").addEventListener("click", e => { const b = e.target.closest("[data-del]"); if (!b) return; store.set(key("levels"), getLevels().filter(x => x !== +b.dataset.del)); drawLines(); });
+["entry","stop","target"].forEach(f => $("tr-" + f).addEventListener("change", () => { const t = getTrade(); t[f] = num($("tr-" + f).value); store.set(key("trade"), t); drawLines(); }));
+$("tr-clear").onclick = () => { store.set(key("trade"), {}); drawLines(); };
+$("toggle-panel").onclick = () => { $("panel").hidden = !$("panel").hidden; store.set("panel", !$("panel").hidden); };
+$("panel").hidden = !store.get("panel", false);
+
+/* ---------- Controls ---------- */
+function wire(id, k){
+  const el = $(id);
+  const paint = () => el.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === state[k]));
   el.addEventListener("click", e => {
-    const b = e.target.closest("button"); if (!b || b.dataset.v === state[key]) return;
-    state[key] = b.dataset.v; store.set(key === "quote" ? "quote2" : key, state[key]); paint(); loadChart();
+    const b = e.target.closest("button"); if (!b || b.dataset.v === state[k]) return;
+    state[k] = b.dataset.v; store.set(k, state[k]); paint();
+    if (k === "tf") chart.applyOptions({ timeScale: { timeVisible: state.tf !== "1d" } });
+    refresh(true);
   });
   paint();
 }
-wire("pair","pair"); wire("quote","quote"); wire("tf","tf");
 
-/* Dark by default; light is a choice that's remembered */
 function applyTheme(){
   document.documentElement.dataset.theme = state.theme;
-  document.querySelector('meta[name="theme-color"]').content = state.theme === "dark" ? "#0B0D10" : "#F5F6F8";
+  document.querySelector('meta[name="theme-color"]').content = css("--bg");
 }
-document.getElementById("theme").onclick = () => { state.theme = state.theme === "dark" ? "light" : "dark"; store.set("theme", state.theme); applyTheme(); loadChart(); };
+$("theme").onclick = () => { state.theme = state.theme === "dark" ? "light" : "dark"; store.set("theme", state.theme); applyTheme(); buildChart(); refresh(true); };
 
+/* ---------- Start ---------- */
 applyTheme();
-loadChart();
+if (!window.LightweightCharts){
+  $("msg").textContent = "The chart library couldn't load. Check your connection and reopen the app.";
+} else {
+  wire("pair","pair"); wire("tf","tf");
+  buildChart(); refresh(true);
+  setInterval(() => refresh(false), 60000);                        // new candles every minute
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });  // fresh prices when you reopen the app
+}
 </script>
 </body>
 </html>
