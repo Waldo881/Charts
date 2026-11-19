@@ -141,11 +141,19 @@ async function loadData(){
   const coin = await klines(`${state.pair}USDT`, state.tf);
   let rateAt, live = true;
   try {
-    const zar = await klines("USDTZAR", state.tf);
-    const byTime = new Map(zar.map(k => [k[0], k]));
-    let last = +zar[0][4];
-    // USDT/ZAR trades less than BTC; where a candle is missing, carry the last known rate forward
-    rateAt = t => { const k = byTime.get(t); if (k) last = +k[4]; return { o: k ? +k[1] : last, c: last }; };
+    /* One USDT/ZAR rate per day. USDT/ZAR trades thinly, so its minute and hour prices jump in steps; using each
+       candle's own rate made fake bodies and gaps. With one rate per day the candles keep Bitcoin's real shape.
+       Past days use their daily close; today uses the median of today's hourly closes. */
+    const days = await klines("USDTZAR", "1d"), hours = await klines("USDTZAR", "1h");
+    const DAY = 86400000, today = Math.floor(Date.now() / DAY) * DAY;
+    const todays = hours.filter(h => h[0] >= today).map(h => +h[4]).sort((a, b) => a - b);
+    const todayRate = todays.length ? todays[Math.floor(todays.length / 2)] : +hours[hours.length - 1][4];
+    const byDay = new Map(days.map(d => [d[0], +d[4]]));
+    rateAt = ms => {
+      let d = Math.floor(ms / DAY) * DAY, r = todayRate;
+      if (d < today){ r = +days[0][4]; for (let i = 0; i < 7; i++, d -= DAY) if (byDay.has(d)){ r = byDay.get(d); break; } }
+      return { o: r, c: r };
+    };
   } catch(e){
     const r = await forexRate(); live = false;
     rateAt = () => ({ o: r, c: r });
@@ -166,13 +174,13 @@ let ws = null, liveZar = null, liveCoin = null;
 function startStream(){
   if (ws){ ws.onclose = null; ws.close(); }
   liveZar = liveCoin = null;
-  const s = `${state.pair.toLowerCase()}usdt@kline_${state.tf}/usdtzar@kline_${state.tf}`;
+  const s = `${state.pair.toLowerCase()}usdt@kline_${state.tf}`;      // the rand rate stays today's steady rate
   ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${s}`);
   ws.onmessage = e => {
     const m = JSON.parse(e.data), k = m.data && m.data.k; if (!k) return;
-    if (k.s === "USDTZAR") liveZar = +k.c; else liveCoin = k;
+    liveCoin = k;
     if (!liveCoin || !series || !lastCandles.length) return;
-    const r = liveZar || lastRate;                  // until USDT/ZAR ticks, use the last rate we loaded
+    const r = lastRate;                            // today's steady rate, from the last load
     const bar = { time: Math.floor(liveCoin.t / 1000) + TZ_S, open: liveCoin.o * r, high: liveCoin.h * r, low: liveCoin.l * r, close: liveCoin.c * r };
     const tail = lastCandles[lastCandles.length - 1];
     if (bar.time < tail.time) return;
