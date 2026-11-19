@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover + safe-area padding lets the app run edge to edge under the iPhone notch -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Charts</title>
+<!-- These make "Add to Home Screen" on iPhone open the page full screen, like an app -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Charts">
+<meta name="theme-color" content="#0B0D10">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  /* Same palette as the Trading Desk so the two feel like one system */
+  :root{--bg:#0B0D10;--surface:#12151A;--sunk:#1B1F26;--ink:#E6E9EE;--muted:#8B94A1;--line:#232833;--accent:#5B8DEF;
+    --font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+  :root[data-theme="light"]{--bg:#F5F6F8;--surface:#FFFFFF;--sunk:#EEF0F3;--ink:#111720;--muted:#5B6573;--line:#E2E5EA;--accent:#2F6BEB}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.4 var(--font);-webkit-font-smoothing:antialiased;
+    display:grid;grid-template-rows:auto minmax(0,1fr) auto;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  header,footer{display:flex;align-items:center;gap:6px;padding:8px 10px}
+  header{border-bottom:1px solid var(--line)}
+  footer{border-top:1px solid var(--line);justify-content:space-between}
+  .seg{display:inline-flex;background:var(--sunk);border-radius:9px;padding:3px;gap:2px}
+  .seg button{font:600 13px var(--font);border:0;background:transparent;color:var(--muted);padding:6px 10px;border-radius:7px;cursor:pointer}
+  .seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+  .pair{font:600 13px var(--mono)}
+  .grow{flex:1}
+  a.btn,button.icon{font:600 13px var(--font);color:var(--ink);text-decoration:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+  a.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  #chart{min-height:0;position:relative}
+  #chart .tradingview-widget-container,#chart .tradingview-widget-container__widget{height:100%;width:100%}
+  .off{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);padding:24px}
+  .hint{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="seg" id="pair" role="group" aria-label="Pair"><button data-v="BTC" class="pair">BTC</button><button data-v="ETH" class="pair">ETH</button></div>
+  <div class="seg" id="quote" role="group" aria-label="Priced in"><button data-v="ZAR">ZAR</button><button data-v="USD">USD</button></div>
+  <span class="grow"></span>
+  <div class="seg" id="tf" role="group" aria-label="Timeframe"><button data-v="D">1D</button><button data-v="240">4h</button><button data-v="60">1h</button></div>
+</header>
+
+<main id="chart"><div class="off" id="off" hidden>The chart couldn't load. Check your connection and reopen the app.</div></main>
+
+<footer>
+  <a class="btn primary" href="https://claude.ai/artifact/2K7BbmHwqPW1wo92Y6SCjU">Trading Desk ↗</a>
+  <a class="btn" href="https://www.luno.com/">Luno ↗</a>
+  <span class="grow"></span>
+  <button class="icon" id="theme" type="button" aria-label="Switch theme">Light / dark</button>
+</footer>
+
+<script>
+/* Settings live in localStorage so the app reopens on the same pair, currency, timeframe and theme.
+   Wrapped in try/catch because private browsing can block storage. */
+const store = {
+  get(k, d){ try { const v = localStorage.getItem("charts-" + k); return v === null ? d : v; } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem("charts-" + k, v); } catch(e){} }
+};
+const state = { pair: store.get("pair","BTC"), quote: store.get("quote","ZAR"), tf: store.get("tf","D"), theme: store.get("theme","dark") };
+
+/* Which TradingView symbol to show.
+   ZAR: no exchange prefix, so TradingView picks its own rand feed. It can differ a little from Luno,
+   so the trend and levels are what count; always check the price on Luno before placing an order.
+   USD: Binance's USDT pairs, the deepest market, handy when the rand chart looks thin. */
+const symbolFor = () => state.quote === "ZAR" ? `${state.pair}ZAR` : `BINANCE:${state.pair}USDT`;
+
+/* TradingView's free Advanced Chart widget. Changing a setting rebuilds it, because the widget
+   reads its settings only once, when its script loads. */
+function loadChart(){
+  const host = document.getElementById("chart");
+  host.querySelectorAll(".tradingview-widget-container").forEach(n => n.remove());
+  document.getElementById("off").hidden = true;
+  const box = document.createElement("div");
+  box.className = "tradingview-widget-container";
+  box.innerHTML = '<div class="tradingview-widget-container__widget"></div>';
+  const s = document.createElement("script");
+  s.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+  s.async = true;
+  s.textContent = JSON.stringify({
+    autosize: true, symbol: symbolFor(), interval: state.tf, timezone: "Africa/Johannesburg",
+    theme: state.theme, style: "1", locale: "en",
+    backgroundColor: state.theme === "dark" ? "#0B0D10" : "#FFFFFF",
+    allow_symbol_change: true,      // lets you pick another feed from the symbol search if this one looks off
+    hide_side_toolbar: window.innerWidth < 600,   // drawing tools take too much room on a phone held upright
+    withdateranges: true, calendar: false, details: false, save_image: false,
+    support_host: "https://www.tradingview.com"
+  });
+  s.onerror = () => { document.getElementById("off").hidden = false; };
+  box.append(s);
+  host.append(box);
+}
+
+/* Segmented controls: highlight the current choice, save it and redraw */
+function wire(id, key){
+  const el = document.getElementById(id);
+  const paint = () => el.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === state[key]));
+  el.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b || b.dataset.v === state[key]) return;
+    state[key] = b.dataset.v; store.set(key, state[key]); paint(); loadChart();
+  });
+  paint();
+}
+wire("pair","pair"); wire("quote","quote"); wire("tf","tf");
+
+/* Dark by default; light is a choice that's remembered */
+function applyTheme(){
+  document.documentElement.dataset.theme = state.theme;
+  document.querySelector('meta[name="theme-color"]').content = state.theme === "dark" ? "#0B0D10" : "#F5F6F8";
+}
+document.getElementById("theme").onclick = () => { state.theme = state.theme === "dark" ? "light" : "dark"; store.set("theme", state.theme); applyTheme(); loadChart(); };
+
+applyTheme();
+loadChart();
+</script>
+</body>
+</html>
